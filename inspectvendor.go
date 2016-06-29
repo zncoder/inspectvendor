@@ -69,10 +69,21 @@ func main() {
 		}
 	}()
 
+	cli.Define("list", doList)
 	cli.Define("dir", doDirect)
 	cli.Define("indir", doIndirect)
 	cli.Define("showversion", doShowVersion)
 	cli.Main()
+}
+
+func doList() {
+	cli.ParseFlag(initCommon)
+
+	spec := readSpec(*repo, "")
+
+	for _, p := range spec.Pkgs {
+		fmt.Fprintf(w, "%s\t%s\n", p.Path, p.Revision)
+	}
 }
 
 func doDirect() {
