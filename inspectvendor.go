@@ -215,7 +215,7 @@ func vendorRepo(ps *PkgSpec) string {
 var w *tabwriter.Writer
 var gopaths []string
 
-func initCommon() {
+func initCommon() bool {
 	w = tabwriter.NewWriter(os.Stdout, 8, 8, 4, ' ', 0)
 
 	gopaths = filepath.SplitList(os.Getenv("GOPATH"))
@@ -225,6 +225,7 @@ func initCommon() {
 		log.Fatalf("abs of repo=%s err=%v", *repo, err)
 	}
 	*repo = d
+	return true
 }
 
 func readSpec(dir, ver string) *Spec {
