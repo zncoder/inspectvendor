@@ -73,6 +73,7 @@ func main() {
 	cli.Define("dir", doDirect)
 	cli.Define("indir", doIndirect)
 	cli.Define("showversion", doShowVersion)
+	cli.Define("dag", doDAG)
 	cli.Main()
 }
 
