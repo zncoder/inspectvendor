@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -28,10 +29,34 @@ type ImportGraph struct {
 	added      []string
 }
 
+type matcher struct {
+	re *regexp.Regexp
+}
+
+func newMatcher(p string) matcher {
+	var m matcher
+	if p != "" {
+		m.re = regexp.MustCompile(p)
+	}
+	return m
+}
+
+func (mr matcher) Match(pn string) bool {
+	if mr.re == nil {
+		return true
+	}
+	i := strings.Index(pn, "/vendor/")
+	if i >= 0 {
+		pn = pn[i+len("/vendor/"):]
+	}
+	return mr.re.MatchString(pn)
+}
+
 func doDAG() {
 	includeStd := flag.Bool("std", false, "include packages in stdlib")
 	outputFormat := flag.String("f", "text", "output format: text, dot, or svg. 'dot' and 'svg' requires the dot program")
 	svgViewer := flag.String("svgviewer", "xdg-open", "svg viewer")
+	matches := flag.String("m", "", "show only packages that match this regexp")
 	cli.ParseFlag()
 
 	wd, err := os.Getwd()
@@ -42,13 +67,15 @@ func doDAG() {
 	ig := NewImportGraph(wd, *includeStd, flag.Args())
 	ig.Scan()
 
+	mr := newMatcher(*matches)
+
 	switch *outputFormat {
 	case "dot":
-		ig.WriteDot(os.Stdout)
+		ig.WriteDot(os.Stdout, mr)
 	case "svg":
-		ig.ShowGraph(*svgViewer)
+		ig.ShowGraph(*svgViewer, mr)
 	default:
-		ig.WriteText(os.Stdout)
+		ig.WriteText(os.Stdout, mr)
 	}
 }
 
@@ -140,22 +167,36 @@ func (ig *ImportGraph) list(args []string) {
 	ig.todo = pkgs
 }
 
-func (ig *ImportGraph) WriteText(w io.Writer) {
+func (ig *ImportGraph) WriteText(w io.Writer, mr matcher) {
 	for _, pn := range ig.added {
-		fmt.Fprintf(w, "%s <= %s\n", pn, ig.ImportPaths[pn])
-		ims := ig.Imports[pn]
-		for _, pi := range ims {
+		if !mr.Match(pn) {
+			continue
+		}
+
+		var filtered []string
+		for _, pi := range ig.Imports[pn] {
 			if !ig.includeStd {
 				if _, ok := ig.Std[pi]; ok {
 					continue
 				}
 			}
+			if !mr.Match(pi) {
+				continue
+			}
+			filtered = append(filtered, pi)
+		}
+		if len(filtered) == 0 {
+			continue
+		}
+
+		fmt.Fprintf(w, "%s <= %s\n", pn, ig.ImportPaths[pn])
+		for _, pi := range filtered {
 			fmt.Fprintf(w, "    %s\n", pi)
 		}
 	}
 }
 
-func (ig *ImportGraph) WriteDot(w io.Writer) {
+func (ig *ImportGraph) WriteDot(w io.Writer, mr matcher) {
 	nodes := make(map[string]int)
 	for i, pn := range ig.added {
 		nodes[pn] = i
@@ -163,19 +204,32 @@ func (ig *ImportGraph) WriteDot(w io.Writer) {
 
 	fmt.Fprintf(w, "digraph pkgdag {\n")
 	for i, pn := range ig.added {
-		if pv := ig.ImportPaths[pn]; strings.Contains(pv, "/vendor/") {
-			fmt.Fprintf(w, "    %d [label=\"%s\",style=filled];\n", i, pn)
-		} else {
-			fmt.Fprintf(w, "    %d [label=\"%s\"];\n", i, pn)
+		if !mr.Match(pn) {
+			continue
 		}
 
-		ims := ig.Imports[pn]
-		for _, pi := range ims {
+		var filtered []string
+		for _, pi := range ig.Imports[pn] {
 			if !ig.includeStd {
 				if _, ok := ig.Std[pi]; ok {
 					continue
 				}
 			}
+			if !mr.Match(pi) {
+				continue
+			}
+			filtered = append(filtered, pi)
+		}
+		if len(filtered) == 0 {
+			continue
+		}
+
+		if pv := ig.ImportPaths[pn]; strings.Contains(pv, "/vendor/") {
+			fmt.Fprintf(w, "    %d [label=\"%s\",style=filled];\n", i, pn)
+		} else {
+			fmt.Fprintf(w, "    %d [label=\"%s\"];\n", i, pn)
+		}
+		for _, pi := range filtered {
 			fmt.Fprintf(w, "    %d -> %d;\n", i, nodes[pi])
 		}
 	}
@@ -192,9 +246,9 @@ func run(name string, stdin io.Reader, args ...string) {
 	}
 }
 
-func (ig *ImportGraph) ShowGraph(svgViewer string) {
+func (ig *ImportGraph) ShowGraph(svgViewer string, mr matcher) {
 	var buf bytes.Buffer
-	ig.WriteDot(&buf)
+	ig.WriteDot(&buf, mr)
 
 	f, err := ioutil.TempFile("", "pkgdag-")
 	if err != nil {
