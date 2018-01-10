@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"zncoder.com/cli"
+	"github.com/zncoder/cli"
 )
 
 type ImportGraph struct {
@@ -54,7 +54,7 @@ func (mr matcher) Match(pn string) bool {
 
 func doDAG() {
 	includeStd := flag.Bool("std", false, "include packages in stdlib")
-	outputFormat := flag.String("f", "text", "output format: text, dot, or svg. 'dot' and 'svg' requires the dot program")
+	outputFormat := flag.String("f", "flat", "output format: flat, text, dot, or svg. 'dot' and 'svg' requires the dot program")
 	svgViewer := flag.String("svgviewer", "xdg-open", "svg viewer")
 	matches := flag.String("m", "", "show only packages that match this regexp")
 	cli.ParseFlag()
@@ -74,8 +74,10 @@ func doDAG() {
 		ig.WriteDot(os.Stdout, mr)
 	case "svg":
 		ig.ShowGraph(*svgViewer, mr)
-	default:
+	case "text":
 		ig.WriteText(os.Stdout, mr)
+	default:
+		ig.WriteFlat(os.Stdout, mr)
 	}
 }
 
@@ -137,6 +139,10 @@ func (ig *ImportGraph) addPkg(pn string) []string {
 }
 
 func (ig *ImportGraph) skip(pn string) bool {
+	// ignore `import "C"` and "golang_org/x" that is vendored in go/src
+	if pn == "C" || strings.HasPrefix(pn, "golang_org/x/") {
+		return true
+	}
 	if _, ok := ig.Imports[pn]; ok {
 		return true
 	}
@@ -162,7 +168,8 @@ func (ig *ImportGraph) list(args []string) {
 	var pkgs []string
 	sc := bufio.NewScanner(&buf)
 	for sc.Scan() {
-		pkgs = append(pkgs, sc.Text())
+		p := sc.Text()
+		pkgs = append(pkgs, p)
 	}
 	ig.todo = pkgs
 }
@@ -193,6 +200,21 @@ func (ig *ImportGraph) WriteText(w io.Writer, mr matcher) {
 		for _, pi := range filtered {
 			fmt.Fprintf(w, "    %s\n", pi)
 		}
+	}
+}
+
+func (ig *ImportGraph) WriteFlat(w io.Writer, mr matcher) {
+	var out []string
+	for _, pn := range ig.added {
+		if !mr.Match(pn) {
+			continue
+		}
+		out = append(out, pn)
+	}
+	sort.Strings(out)
+
+	for _, p := range out {
+		fmt.Println(p)
 	}
 }
 
